@@ -48,10 +48,10 @@ export const roles = [
 ];
 
 export const users = [
-  { id: 1, name: "ERIC THEURI MUGA", email: "admin@sbf.test", password: "Pass123!", roleId: 1 },
-  { id: 2, name: "Finance User", email: "finance@sbf.test", password: "Pass123!", roleId: 2 },
-  { id: 3, name: "Project User", email: "pm@sbf.test", password: "Pass123!", roleId: 3 },
-  { id: 4, name: "Member User", email: "member@sbf.test", password: "Pass123!", roleId: 4 }
+  { id: 1, name: "ERIC THEURI MUGA", email: "admin@sbf.test", password: "Pass123!", roleId: 1, directPermissions: [] },
+  { id: 2, name: "Finance User", email: "finance@sbf.test", password: "Pass123!", roleId: 2, directPermissions: [] },
+  { id: 3, name: "Project User", email: "pm@sbf.test", password: "Pass123!", roleId: 3, directPermissions: [] },
+  { id: 4, name: "Member User", email: "member@sbf.test", password: "Pass123!", roleId: 4, directPermissions: [] }
 ];
 
 export function getRole(roleId) {
@@ -65,7 +65,8 @@ export function safeUser(u) {
     name: u.name,
     email: u.email,
     role: role ? { id: role.id, name: role.name } : null,
-    permissions: role?.permissions || []
+    directPermissions: u.directPermissions || [],
+    permissions: [...new Set([...(role?.permissions || []), ...(u.directPermissions || [])])]
   };
 }
 
