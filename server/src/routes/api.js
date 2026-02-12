@@ -56,19 +56,6 @@ function clearRefreshCookie(res) {
 }
 
 
-// function safeUser(user) {
-//   const record = user.toJSON();
-//   const role = user.role()?.toJSON() || null;
-//   const permissions = getAllPermissions(user);
-//   return {
-//     id: record.id,
-//     name: record.name,
-//     email: record.email,
-//     role,
-//     permissions
-//   };
-// }
-
 function safeUser(user) {
   const record = user.toJSON();
   const role = user.role()?.toJSON() || null;
@@ -99,7 +86,8 @@ function requireAuth(req, res, next) {
 
 function requirePermission(permissionKey) {
   return (req, res, next) => {
-    if (!can(req.session.user, permissionKey)) {
+    const user = currentUser(req);
+    if (!user || !can(user, permissionKey)) {
       return res.status(403).json({ error: "Forbidden", missing: permissionKey });
     }
 
@@ -189,6 +177,15 @@ r.post("/auth/refresh", (req, res) => {
   setRefreshCookie(res, refreshed.refreshToken);
   res.json({ ok: true, accessToken: refreshed.accessToken });
 });
+r.post("/auth/refresh", (req, res) => {
+  const cookies = parseCookies(req);
+  const refreshed = AuthService.refreshAuthTokens(cookies.refresh_token);
+  if (!refreshed.ok) return res.status(401).json({ ok: false, error: refreshed.error });
+
+  const userSafe = safeUser(refreshed.user);
+  req.session.user = userSafe;
+  req.authUserId = userSafe.id;
+  setRefreshCookie(res, refreshed.refreshToken);
 
 r.get("/claims", requireAuth, (req, res) => {
   const user = currentUser(req);
