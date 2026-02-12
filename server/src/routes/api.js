@@ -56,18 +56,18 @@ function clearRefreshCookie(res) {
 }
 
 
-function safeUser(user) {
-  const record = user.toJSON();
-  const role = user.role()?.toJSON() || null;
-  const permissions = getAllPermissions(user);
-  return {
-    id: record.id,
-    name: record.name,
-    email: record.email,
-    role,
-    permissions
-  };
-}
+// function safeUser(user) {
+//   const record = user.toJSON();
+//   const role = user.role()?.toJSON() || null;
+//   const permissions = getAllPermissions(user);
+//   return {
+//     id: record.id,
+//     name: record.name,
+//     email: record.email,
+//     role,
+//     permissions
+//   };
+// }
 
 function safeUser(user) {
   const record = user.toJSON();
@@ -179,6 +179,9 @@ r.post("/auth/refresh", (req, res) => {
   const cookies = parseCookies(req);
   const refreshed = AuthService.refreshAuthTokens(cookies.refresh_token);
   if (!refreshed.ok) return res.status(401).json({ ok: false, error: refreshed.error });
+  setRefreshCookie(res, refreshed.refreshToken);
+  res.json({ ok: true, accessToken: refreshed.accessToken });
+});
 
 r.get("/claims", requireAuth, (req, res) => {
   const user = currentUser(req);
