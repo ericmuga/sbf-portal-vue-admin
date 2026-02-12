@@ -46,7 +46,7 @@
           </div>
 
           <div class="mt-4 text-sm text-center">
-            Are you new here? <a class="font-semibold underline" href="#" @click.prevent> Create an Account</a>
+            Are you new here? <a class="font-semibold underline" href="#" @click.prevent="router.push('/login/register')"> Create an Account</a>
           </div>
 
           <div class="mt-6 space-y-4">
@@ -69,6 +69,16 @@
             </button>
 
             <p v-if="error" class="text-sm text-amber-200">{{ error }}</p>
+
+
+            <div class="relative py-1">
+              <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-white/30"></div></div>
+              <div class="relative flex justify-center text-xs uppercase"><span class="px-2 bg-[#0b63c6] text-white/80">Or</span></div>
+            </div>
+
+            <button class="w-full py-3 font-semibold transition rounded-xl bg-white text-slate-900 hover:bg-slate-100" :disabled="loading" @click="googleLogin">
+              Continue with Google
+            </button>
           </div>
         </div>
 
@@ -85,7 +95,7 @@
 </template>
 
 <script setup>
-import { ref } from "vue";
+import { ref, watchEffect } from "vue";
 import { useRouter } from "vue-router";
 import { useAuthStore } from "../stores/auth.js";
 
@@ -96,6 +106,15 @@ const email = ref("admin@sbf.test");
 const password = ref("Pass123!");
 const loading = ref(false);
 const error = ref("");
+
+watchEffect(() => {
+  const qError = router.currentRoute.value.query.error;
+  if (typeof qError === "string" && qError) error.value = qError;
+});
+
+function googleLogin() {
+  auth.startGoogleLogin();
+}
 
 async function submit() {
   loading.value = true;
