@@ -22,58 +22,40 @@ npm run dev
 ```
 Client runs on http://localhost:5173
 
-## Auth features implemented
+## What was implemented
 
-### Email OTP 2FA
-- Email/password login requires OTP verification
-- OTP expires in 5 minutes
-- OTP sent with Gmail API OAuth2 transport
+### 1) Laravel-like permissions (Node.js)
+- Role + permission checks via `can(user, permission)`
+- Role-permission and direct user-permission sync
+- Ability inspection endpoint
 
-### Google Login
-- Login page has **Continue with Google**
-- Backend OAuth flow:
-  - `GET /api/auth/google/start`
-  - `GET /api/auth/google/callback`
-- Callback redirects to client route:
-  - `/login/google/callback?accessToken=...`
-- If Google OAuth is not configured/misconfigured, server redirects back to `/login` with a user-friendly error query message.
+### 2) SQLite persistence + abstractions
+- `better-sqlite3` database with schema bootstrap in `server/src/db/schema.js`
+- Reusable base model (`BaseModel`) and domain model inheritance in `server/src/models/domain.js`
+- Shared service inheritance via `BaseDomainService` for audit logs + notifications
 
-### Self registration
-- Login page **Create an Account** now navigates to `/login/register`
-- New users can register with name, email, and password via `POST /api/auth/register`
+### 3) 2FA OTP
+- Login now requires OTP verification
+- OTP is generated dynamically and expires in 5 minutes
+- Endpoints: login, request OTP, verify OTP
 
-### Access + Refresh token flow
-- Access token is a short-lived signed token (default 15 minutes)
-- Refresh token is long-lived, HTTP-only cookie (default 30 days)
-- Refresh endpoint:
-  - `POST /api/auth/refresh`
-- Client axios interceptor auto-refreshes on `401` and retries request
+### 4) Feature modules from your diagram (core backend coverage)
+- SBF module: policies, claims, claim docs, member-admin messaging
+- Chakama Ranch module: shares, next-of-kin, projects/tasks, funding requests, PO + PO lines, ledgers
+- Approvals/Audit/Notifications: submit/decide approvals, track, audit logs, notifications
+- Shared finance core: invoices + invoice lines, receive/view payments, customer ledger posting
 
-## Required env for Google login + token refresh
-Use `server/.env.example` as base.
+## Important API endpoints
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `POST /api/auth/request-otp`
+- `POST /api/auth/verify-otp`
+- `GET /api/admin/users/:id/ability`
+- `POST /api/admin/roles/:id/permissions`
+- `POST /api/admin/users/:id/permissions`
 
-```bash
-SESSION_SECRET=dev-secret
-AUTH_TOKEN_SECRET=dev-token-secret
-ACCESS_TOKEN_TTL_SECONDS=900
-REFRESH_TOKEN_TTL_DAYS=30
-CLIENT_BASE_URL=http://localhost:5173
-GOOGLE_OAUTH_REDIRECT_URI=http://localhost:3000/api/auth/google/callback
-GOOGLE_OAUTH_CLIENT_ID=...
-GOOGLE_OAUTH_CLIENT_SECRET=...
-```
-
-## Google Cloud OAuth local setup
-For localhost testing:
-
-- Authorized JavaScript origins:
-  - `http://localhost:5173`
-  - `http://127.0.0.1:5173`
-- Authorized redirect URI:
-  - `http://localhost:3000/api/auth/google/callback`
-  - `http://127.0.0.1:3000/api/auth/google/callback`
-
-## Existing backend modules
-- Laravel-like permissions (role + direct permission sync)
-- SQLite model abstractions + service inheritance
-- SBF module, Chakama ranch module, approvals/audit/notifications, and shared finance workflows
+## Demo Users (password: Pass123!)
+- Admin: admin@sbf.test
+- Finance Officer: finance@sbf.test
+- Project Manager: pm@sbf.test
+- Member: member@sbf.test
