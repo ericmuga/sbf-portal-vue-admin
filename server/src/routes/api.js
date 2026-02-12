@@ -24,6 +24,50 @@ import { AuthService } from "../services/AuthService.js";
 import { WorkflowService } from "../services/WorkflowService.js";
 
 const r = Router();
+const GOOGLE_OAUTH_REDIRECT_URI = process.env.GOOGLE_OAUTH_REDIRECT_URI || "http://localhost:3000/api/auth/google/callback";
+const CLIENT_BASE_URL = process.env.CLIENT_BASE_URL || "http://localhost:5173";
+
+function parseCookies(req) {
+  const header = req.headers.cookie || "";
+  return Object.fromEntries(
+    header
+      .split(";")
+      .map(part => part.trim())
+      .filter(Boolean)
+      .map(part => {
+        const idx = part.indexOf("=");
+        return [part.slice(0, idx), decodeURIComponent(part.slice(idx + 1))];
+      })
+  );
+}
+
+function setRefreshCookie(res, refreshToken) {
+  res.cookie("refresh_token", refreshToken, {
+    httpOnly: true,
+    secure: false,
+    sameSite: "lax",
+    path: "/api/auth",
+    maxAge: 30 * 24 * 60 * 60 * 1000
+  });
+}
+
+function clearRefreshCookie(res) {
+  res.clearCookie("refresh_token", { path: "/api/auth" });
+}
+
+
+function safeUser(user) {
+  const record = user.toJSON();
+  const role = user.role()?.toJSON() || null;
+  const permissions = getAllPermissions(user);
+  return {
+    id: record.id,
+    name: record.name,
+    email: record.email,
+    role,
+    permissions
+  };
+}
 
 function safeUser(user) {
   const record = user.toJSON();
@@ -39,7 +83,17 @@ function safeUser(user) {
 }
 
 function requireAuth(req, res, next) {
-  if (!req.session.user) return res.status(401).json({ error: "Not authenticated" });
+  if (req.session.user) {
+    req.authUserId = req.session.user.id;
+    return next();
+  }
+
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  const payload = AuthService.verifyAccessToken(token);
+  if (!payload?.sub) return res.status(401).json({ error: "Not authenticated" });
+
+  req.authUserId = Number(payload.sub);
   next();
 }
 
@@ -48,6 +102,8 @@ function requirePermission(permissionKey) {
     if (!can(req.session.user, permissionKey)) {
       return res.status(403).json({ error: "Forbidden", missing: permissionKey });
     }
+
+    if (!req.session.user) req.session.user = safeUser(user);
     next();
   };
 }
@@ -119,6 +175,10 @@ r.get("/policies", requireAuth, (req, res) => {
   const policies = Policy.where({ user_id: user.toJSON().id }).map(x => x.toJSON());
   res.json({ policies });
 });
+r.post("/auth/refresh", (req, res) => {
+  const cookies = parseCookies(req);
+  const refreshed = AuthService.refreshAuthTokens(cookies.refresh_token);
+  if (!refreshed.ok) return res.status(401).json({ ok: false, error: refreshed.error });
 
 r.get("/claims", requireAuth, (req, res) => {
   const user = currentUser(req);

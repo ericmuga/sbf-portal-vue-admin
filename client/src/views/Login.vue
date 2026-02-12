@@ -69,6 +69,16 @@
             </button>
 
             <p v-if="error" class="text-sm text-amber-200">{{ error }}</p>
+
+
+            <div class="relative py-1">
+              <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-white/30"></div></div>
+              <div class="relative flex justify-center text-xs uppercase"><span class="px-2 bg-[#0b63c6] text-white/80">Or</span></div>
+            </div>
+
+            <button class="w-full py-3 font-semibold transition rounded-xl bg-white text-slate-900 hover:bg-slate-100" :disabled="loading" @click="googleLogin">
+              Continue with Google
+            </button>
           </div>
         </div>
 
@@ -96,6 +106,10 @@ const email = ref("admin@sbf.test");
 const password = ref("Pass123!");
 const loading = ref(false);
 const error = ref("");
+
+function googleLogin() {
+  auth.startGoogleLogin();
+}
 
 async function submit() {
   loading.value = true;

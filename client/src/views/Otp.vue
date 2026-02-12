@@ -18,7 +18,7 @@
 
         <div class="mt-6">
           <div class="text-xs text-slate-500 mb-2">OTP</div>
-          <input v-model="otp" class="input" placeholder="Enter OTP (demo: 123456)" maxlength="6" />
+          <input v-model="otp" class="input" placeholder="Enter OTP" maxlength="6" />
           <p v-if="error" class="mt-2 text-sm text-red-600">{{ error }}</p>
         </div>
 

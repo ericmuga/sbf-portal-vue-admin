@@ -3,6 +3,7 @@ import { useAuthStore } from "./stores/auth.js";
 
 import Login from "./views/Login.vue";
 import Otp from "./views/Otp.vue";
+import GoogleCallback from "./views/GoogleCallback.vue";
 
 import Dashboard from "./views/Dashboard.vue";
 import Payments from "./views/Payments.vue";
@@ -21,6 +22,7 @@ const routes = [
 
   { path: "/login", component: Login, meta: { public: true } },
   { path: "/login/otp", component: Otp, meta: { public: true } },
+  { path: "/login/google/callback", component: GoogleCallback, meta: { public: true } },
 
   // Member Portal
   { path: "/dashboard", component: Dashboard, meta: { permission: null } },
