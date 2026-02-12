@@ -76,7 +76,7 @@ r.post("/auth/register", (req, res) => {
   res.status(201).json({ ok: true, user: safeUser(created) });
 });
 
-r.post("/auth/login", async (req, res) => {
+r.post("/auth/login", (req, res) => {
   const { email, password } = req.body;
   const found = AuthService.findUserByEmail(email);
   if (!found || found.toJSON().password_hash !== password) {
@@ -84,18 +84,16 @@ r.post("/auth/login", async (req, res) => {
   }
 
   req.session.pendingUserId = found.toJSON().id;
-  const otp = await AuthService.issueOtp(found.toJSON().id);
-  if (!otp.ok) return res.status(500).json({ ok: false, error: otp.error });
+  const otp = AuthService.issueOtp(found.toJSON().id);
 
-  res.json({ ok: true, otpRequired: true, message: "OTP sent to your Gmail address" });
+  res.json({ ok: true, otpRequired: true, message: "OTP required", otpHint: otp.code });
 });
 
-r.post("/auth/request-otp", async (req, res) => {
+r.post("/auth/request-otp", (req, res) => {
   const pendingUserId = req.session.pendingUserId;
   if (!pendingUserId) return res.status(400).json({ error: "No pending login found" });
-  const otp = await AuthService.issueOtp(pendingUserId);
-  if (!otp.ok) return res.status(500).json({ ok: false, error: otp.error });
-  res.json({ ok: true, message: "OTP sent to your Gmail address" });
+  const otp = AuthService.issueOtp(pendingUserId);
+  res.json({ ok: true, message: "OTP sent", otpHint: otp.code });
 });
 
 r.post("/auth/verify-otp", (req, res) => {
