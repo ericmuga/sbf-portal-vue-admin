@@ -107,11 +107,6 @@ const password = ref("Pass123!");
 const loading = ref(false);
 const error = ref("");
 
-watchEffect(() => {
-  const qError = router.currentRoute.value.query.error;
-  if (typeof qError === "string" && qError) error.value = qError;
-});
-
 function googleLogin() {
   auth.startGoogleLogin();
 }
