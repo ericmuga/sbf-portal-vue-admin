@@ -46,7 +46,7 @@
           </div>
 
           <div class="mt-4 text-sm text-center">
-            Are you new here? <a class="font-semibold underline" href="#" @click.prevent> Create an Account</a>
+            Are you new here? <a class="font-semibold underline" href="#" @click.prevent="router.push('/login/register')"> Create an Account</a>
           </div>
 
           <div class="mt-6 space-y-4">
@@ -95,7 +95,7 @@
 </template>
 
 <script setup>
-import { ref } from "vue";
+import { ref, watchEffect } from "vue";
 import { useRouter } from "vue-router";
 import { useAuthStore } from "../stores/auth.js";
 
