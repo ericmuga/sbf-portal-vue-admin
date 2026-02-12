@@ -1,10 +1,8 @@
-# SBF Portal (Vue + Tailwind) + Node/Express API (ES6) — Member + Admin Portal
+# SBF Portal (Vue + Tailwind) + Node/Express API (ES6)
 
 This repo contains:
-- `server/` Express API (ES modules) with demo RBAC
-- `client/` Vue 3 + Vite + Tailwind UI:
-  - Member portal (Dashboard, Payments Cart, Claims workflow, Beneficiaries)
-  - Admin portal (Users, Roles & Permissions, Payments, POs, Projects)
+- `server/` Express API (ES modules) with SQLite-backed RBAC and workflow modules
+- `client/` Vue 3 + Vite + Tailwind UI
 
 ## Run (Dev)
 
@@ -24,22 +22,48 @@ npm run dev
 ```
 Client runs on http://localhost:5173
 
-## Demo Login Flow
-1) Go to `/login` (email + password)
-2) After successful credentials, go to OTP screen
-3) OTP is `123456`
+## Google/Gmail OTP delivery
+OTP is now sent to Gmail using the Google Gmail API (OAuth2).
 
-## Demo Users (password: Pass123!)
-- Admin: admin@sbf.test
-- Finance Officer: finance@sbf.test
-- Project Manager: pm@sbf.test
-- Member: member@sbf.test
+Set these environment variables before starting the API:
 
-## Role-Based Access
-Admin routes require permissions like:
-- `admin.access`
-- `users.view`, `users.manage`
-- `roles.view`
-- `payments.view`
-- `pos.view`
-- `projects.view`
+```bash
+OTP_EMAIL_ENABLED=true
+GMAIL_USER=youraccount@gmail.com
+GMAIL_FROM="SBF Portal <youraccount@gmail.com>"
+
+# Option A: use a long-lived access token you rotate manually
+GMAIL_ACCESS_TOKEN=...
+
+# Option B: auto-refresh token (recommended)
+GMAIL_CLIENT_ID=...
+GMAIL_CLIENT_SECRET=...
+GMAIL_REFRESH_TOKEN=...
+```
+
+If `OTP_EMAIL_ENABLED` is false, OTP email delivery is skipped (useful in local dev).
+
+## What was implemented
+
+### 1) Laravel-like permissions (Node.js)
+- Role + permission checks via `can(user, permission)`
+- Role-permission and direct user-permission sync
+- Ability inspection endpoint
+
+### 2) SQLite persistence + abstractions
+- SQLite via Node's built-in `node:sqlite`
+- Schema bootstrap in `server/src/db/schema.js`
+- Reusable base model (`BaseModel`) and domain model inheritance in `server/src/models/domain.js`
+- Shared service inheritance via `BaseDomainService` for audit logs + notifications
+
+### 3) 2FA OTP
+- Login requires OTP verification
+- OTP expires in 5 minutes
+- OTP is delivered over Gmail email transport
+- Endpoints: login, request OTP, verify OTP
+
+### 4) Feature modules from your diagram (core backend coverage)
+- SBF module: policies, claims, claim docs, member-admin messaging
+- Chakama Ranch module: shares, next-of-kin, projects/tasks, funding requests, PO + PO lines, ledgers
+- Approvals/Audit/Notifications: submit/decide approvals, track, audit logs, notifications
+- Shared finance core: invoices + invoice lines, receive/view payments, customer ledger posting

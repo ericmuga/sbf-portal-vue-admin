@@ -1,21 +1,42 @@
 import { Router } from "express";
+import { can, getAllPermissions, syncRolePermissions } from "../auth/acl.js";
 import {
-  permissions,
-  roles,
-  users,
-  getRole,
-  safeUser,
-  mockPolicies,
-  beneficiariesByPolicy,
-  claims,
-  createClaim,
-  purchaseOrders,
-  projects,
-  projectTasksByProject,
-  payments
-} from "../data/mock.js";
+  Approval,
+  AuditLog,
+  Claim,
+  FundingRequest,
+  Invoice,
+  LedgerEntry,
+  NextOfKin,
+  Notification,
+  Payment,
+  Permission,
+  PoLine,
+  Policy,
+  Project,
+  ProjectTask,
+  PurchaseOrder,
+  Role,
+  Share,
+  User
+} from "../models/domain.js";
+import { AuthService } from "../services/AuthService.js";
+import { WorkflowService } from "../services/WorkflowService.js";
 
 const r = Router();
+
+function safeUser(user) {
+  const record = user.toJSON();
+  const role = user.role()?.toJSON() || null;
+  const permissions = getAllPermissions(user);
+  return {
+    id: record.id,
+    name: record.name,
+    email: record.email,
+    role,
+    permissions
+  };
+}
 
 function requireAuth(req, res, next) {
   if (!req.session.user) return res.status(401).json({ error: "Not authenticated" });
@@ -24,124 +45,310 @@ function requireAuth(req, res, next) {
 
 function requirePermission(permissionKey) {
   return (req, res, next) => {
-    const u = req.session.user;
-    if (!u?.permissions?.includes(permissionKey)) {
+    if (!can(req.session.user, permissionKey)) {
       return res.status(403).json({ error: "Forbidden", missing: permissionKey });
     }
     next();
   };
 }
 
-// --- Auth (credentials -> OTP) ---
-r.post("/auth/login", (req, res) => {
+function currentUser(req) {
+  return User.find(req.session.user.id);
+}
+
+// ----------- Auth + OTP -----------
+r.post("/auth/register", (req, res) => {
+  const { name, email, password } = req.body;
+  if (!name || !email || !password) return res.status(400).json({ error: "name, email and password are required" });
+
+  const existing = AuthService.findUserByEmail(email);
+  if (existing) return res.status(400).json({ error: "Email already exists" });
+
+  const created = User.create({
+    name,
+    email: String(email).toLowerCase(),
+    password_hash: password,
+    role_id: 4,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  });
+
+  res.status(201).json({ ok: true, user: safeUser(created) });
+});
+
+r.post("/auth/login", async (req, res) => {
   const { email, password } = req.body;
-  const found = users.find(u => u.email.toLowerCase() === String(email || "").toLowerCase());
-  if (!found || found.password !== password) {
+  const found = AuthService.findUserByEmail(email);
+  if (!found || found.toJSON().password_hash !== password) {
     return res.status(400).json({ ok: false, error: "Invalid email or password" });
   }
 
-  // store pending user until OTP verification
-  req.session.pendingUserId = found.id;
-  res.json({ ok: true, otpRequired: true, message: "OTP required. Use 123456 (demo)." });
+  req.session.pendingUserId = found.toJSON().id;
+  const otp = await AuthService.issueOtp(found.toJSON().id);
+  if (!otp.ok) return res.status(500).json({ ok: false, error: otp.error });
+
+  res.json({ ok: true, otpRequired: true, message: "OTP sent to your Gmail address" });
 });
 
-r.post("/auth/request-otp", (req, res) => {
-  // In real life: generate OTP and send via SMS/email
-  res.json({ ok: true, message: "OTP sent (demo). Use 123456." });
+r.post("/auth/request-otp", async (req, res) => {
+  const pendingUserId = req.session.pendingUserId;
+  if (!pendingUserId) return res.status(400).json({ error: "No pending login found" });
+  const otp = await AuthService.issueOtp(pendingUserId);
+  if (!otp.ok) return res.status(500).json({ ok: false, error: otp.error });
+  res.json({ ok: true, message: "OTP sent to your Gmail address" });
 });
 
 r.post("/auth/verify-otp", (req, res) => {
   const { otp } = req.body;
-  if (otp !== "123456") return res.status(400).json({ ok: false, error: "Invalid OTP" });
+  const pendingUserId = req.session.pendingUserId;
+  if (!pendingUserId) return res.status(400).json({ ok: false, error: "No pending login found" });
 
-  const pendingId = req.session.pendingUserId;
-  const found = users.find(u => u.id === pendingId);
-  if (!found) return res.status(400).json({ ok: false, error: "No pending login found" });
+  const result = AuthService.verifyOtp(pendingUserId, otp);
+  if (!result.ok) return res.status(400).json({ ok: false, error: result.error });
 
-  req.session.user = safeUser(found);
+  const user = User.find(pendingUserId);
+  req.session.user = safeUser(user);
   delete req.session.pendingUserId;
-
   res.json({ ok: true, user: req.session.user });
 });
 
-r.post("/auth/logout", (req, res) => {
-  req.session.destroy(() => res.json({ ok: true }));
-});
-
+r.post("/auth/logout", (req, res) => req.session.destroy(() => res.json({ ok: true })));
 r.get("/me", requireAuth, (req, res) => res.json({ user: req.session.user }));
 
-// --- Member portal APIs ---
-r.get("/policies", requireAuth, (req, res) => res.json({ policies: mockPolicies }));
-
-r.get("/beneficiaries", requireAuth, (req, res) => {
-  const policyNo = req.query.policyNo;
-  if (!policyNo) return res.status(400).json({ error: "policyNo is required" });
-  res.json({ policyNo, beneficiaries: beneficiariesByPolicy[policyNo] || [] });
+// ---------- SBF module ----------
+r.get("/policies", requireAuth, (req, res) => {
+  const user = currentUser(req);
+  const policies = Policy.where({ user_id: user.toJSON().id }).map(x => x.toJSON());
+  res.json({ policies });
 });
 
-r.get("/claims", requireAuth, (req, res) => res.json({ claims }));
+r.get("/claims", requireAuth, (req, res) => {
+  const user = currentUser(req);
+  const claims = Claim.where({ user_id: user.toJSON().id }).map(x => x.toJSON());
+  res.json({ claims });
+});
 
 r.post("/claims", requireAuth, (req, res) => {
-  const { policyNo, type, description, amount } = req.body;
-  if (!policyNo || !type) return res.status(400).json({ error: "policyNo and type are required" });
-  const created = createClaim({ policyNo, type, description, amount, docs: [] });
-  res.status(201).json({ claim: created });
+  const user = currentUser(req);
+  const claim = WorkflowService.submitClaim({ actorId: user.toJSON().id, payload: req.body });
+  res.status(201).json({ claim: claim.toJSON() });
 });
+
+r.post("/claims/:id/documents", requireAuth, (req, res) => {
+  const user = currentUser(req);
+  const claim = Claim.find(Number(req.params.id));
+  if (!claim) return res.status(404).json({ error: "Claim not found" });
+
+  const { fileName, fileUrl } = req.body;
+  if (!fileName) return res.status(400).json({ error: "fileName is required" });
+  const doc = WorkflowService.uploadClaimDocument({ actorId: user.toJSON().id, claimId: claim.toJSON().id, fileName, fileUrl });
+  res.status(201).json({ document: doc.toJSON() });
+});
+
+r.post("/messages", requireAuth, (req, res) => {
+  const user = currentUser(req);
+  const { recipientId, body } = req.body;
+  const msg = WorkflowService.sendMessage({ actorId: user.toJSON().id, recipientId, body });
+  res.status(201).json({ message: msg.toJSON() });
+});
+
+// -------- Chakama ranch module --------
+r.post("/shares/subscribe", requireAuth, (req, res) => {
+  const user = currentUser(req);
+  const share = WorkflowService.subscribeShares({ actorId: user.toJSON().id, quantity: Number(req.body.quantity || 0) });
+  res.status(201).json({ share: share.toJSON() });
+});
+
+r.get("/shares", requireAuth, (req, res) => {
+  const user = currentUser(req);
+  res.json({ shares: Share.where({ member_id: user.toJSON().id }).map(x => x.toJSON()) });
+});
+
+r.post("/next-of-kin", requireAuth, (req, res) => {
+  const user = currentUser(req);
+  const nok = WorkflowService.maintainNextOfKin({ actorId: user.toJSON().id, payload: req.body });
+  res.status(201).json({ nextOfKin: nok.toJSON() });
+});
+
+r.get("/next-of-kin", requireAuth, (req, res) => {
+  const user = currentUser(req);
+  res.json({ nextOfKin: NextOfKin.where({ user_id: user.toJSON().id }).map(x => x.toJSON()) });
+});
+
+r.get("/vendor-ledger", requireAuth, requirePermission("ledger.manage"), (req, res) => {
+  res.json({ entries: LedgerEntry.where({ ledger_type: "vendor" }).map(x => x.toJSON()) });
+});
+
+r.get("/customer-ledger", requireAuth, requirePermission("ledger.manage"), (req, res) => {
+  res.json({ entries: LedgerEntry.where({ ledger_type: "customer" }).map(x => x.toJSON()) });
+});
+
+r.get("/funding-requests", requireAuth, (req, res) => {
+  res.json({ fundingRequests: FundingRequest.all().map(x => x.toJSON()) });
+});
+
+r.post("/funding-requests", requireAuth, (req, res) => {
+  const user = currentUser(req);
+  const record = WorkflowService.createFundingRequest({ actorId: user.toJSON().id, payload: req.body });
+  res.status(201).json({ fundingRequest: record.toJSON() });
+});
+
+r.get("/purchase-orders", requireAuth, (req, res) => res.json({ purchaseOrders: PurchaseOrder.all().map(x => x.toJSON()) }));
+r.post("/purchase-orders", requireAuth, (req, res) => {
+  const user = currentUser(req);
+  const created = WorkflowService.createPurchaseOrder({ actorId: user.toJSON().id, payload: req.body });
+  res.status(201).json({ purchaseOrder: created.toJSON() });
+});
+
+r.post("/purchase-orders/:id/lines", requireAuth, (req, res) => {
+  const user = currentUser(req);
+  const created = WorkflowService.addPoLine({ actorId: user.toJSON().id, purchaseOrderId: Number(req.params.id), payload: req.body });
+  res.status(201).json({ line: created.toJSON() });
+});
+
+r.get("/purchase-orders/:id/lines", requireAuth, (req, res) => {
+  res.json({ lines: PoLine.where({ purchase_order_id: Number(req.params.id) }).map(x => x.toJSON()) });
+});
+
+r.get("/projects", requireAuth, (req, res) => res.json({ projects: Project.all().map(x => x.toJSON()) }));
+r.post("/projects/:id/tasks", requireAuth, (req, res) => {
+  const user = currentUser(req);
+  const task = WorkflowService.createProjectTask({ actorId: user.toJSON().id, payload: { ...req.body, project_id: Number(req.params.id) } });
+  res.status(201).json({ task: task.toJSON() });
+});
+
+r.get("/projects/:id/tasks", requireAuth, (req, res) => {
+  res.json({ tasks: ProjectTask.where({ project_id: Number(req.params.id) }).map(x => x.toJSON()) });
+});
+
+// ------ Approvals, audit, notifications ------
+r.post("/approvals", requireAuth, (req, res) => {
+  const user = currentUser(req);
+  const record = WorkflowService.submitApproval({ actorId: user.toJSON().id, payload: req.body });
+  res.status(201).json({ approval: record.toJSON() });
+});
+
+r.post("/approvals/:id/decision", requireAuth, requirePermission("approvals.manage"), (req, res) => {
+  const user = currentUser(req);
+  const { status, note } = req.body;
+  if (!["approved", "rejected"].includes(status)) return res.status(400).json({ error: "status must be approved or rejected" });
+
+  const result = WorkflowService.approveReject({ actorId: user.toJSON().id, approvalId: Number(req.params.id), status, note });
+  if (!result) return res.status(404).json({ error: "Approval request not found" });
+  res.json({ approval: result.toJSON() });
+});
+
+r.get("/approvals", requireAuth, (req, res) => res.json({ approvals: Approval.all().map(x => x.toJSON()) }));
+r.get("/audit-logs", requireAuth, requirePermission("approvals.manage"), (req, res) => res.json({ auditLogs: AuditLog.all().map(x => x.toJSON()) }));
+r.get("/notifications", requireAuth, (req, res) => {
+  const user = currentUser(req);
+  res.json({ notifications: Notification.where({ user_id: user.toJSON().id }).map(x => x.toJSON()) });
+});
+
+// ------ Shared finance core ------
+r.post("/invoices", requireAuth, (req, res) => {
+  const user = currentUser(req);
+  const invoice = WorkflowService.createInvoice({ actorId: user.toJSON().id, payload: req.body });
+  res.status(201).json({ invoice: invoice.toJSON() });
+});
+
+r.post("/invoices/:id/lines", requireAuth, (req, res) => {
+  const user = currentUser(req);
+  const line = WorkflowService.addInvoiceLine({ actorId: user.toJSON().id, invoiceId: Number(req.params.id), payload: req.body });
+  res.status(201).json({ line: line.toJSON() });
+});
+
+r.get("/invoices", requireAuth, (req, res) => res.json({ invoices: Invoice.all().map(x => x.toJSON()) }));
 
 r.post("/payments/initiate", requireAuth, (req, res) => {
   const ref = `PAY-${Math.random().toString(16).slice(2).toUpperCase()}`;
-  res.json({ ok: true, reference: ref, status: "PENDING", message: "Payment initiated (demo)." });
+  res.json({ ok: true, reference: ref, status: "PENDING", message: "Payment initiated" });
 });
 
-// -------------------- Admin APIs --------------------
+r.post("/payments/receive", requireAuth, requirePermission("payments.manage"), (req, res) => {
+  const user = currentUser(req);
+  const payment = WorkflowService.receivePayment({ actorId: user.toJSON().id, payload: req.body });
+  res.status(201).json({ payment: payment.toJSON() });
+});
+
+r.get("/payments", requireAuth, requirePermission("payments.view"), (req, res) => res.json({ payments: Payment.all().map(x => x.toJSON()) }));
+
+// ---------- Admin RBAC ----------
+r.get("/admin/permissions", requireAuth, requirePermission("roles.view"), (req, res) => {
+  res.json({ permissions: Permission.all().map(x => x.toJSON()) });
+});
+
+r.get("/admin/roles", requireAuth, requirePermission("roles.view"), (req, res) => {
+  const roles = Role.all().map(role => ({ ...role.toJSON(), permissions: role.permissions().map(p => p.key) }));
+  res.json({ roles });
+});
+
+r.post("/admin/roles/:id/permissions", requireAuth, requirePermission("roles.manage"), (req, res) => {
+  const role = syncRolePermissions(Number(req.params.id), req.body.permissions || []);
+  if (!role) return res.status(400).json({ error: "Invalid role" });
+  res.json({ ok: true, role: { ...role.toJSON(), permissions: role.permissions().map(x => x.key) } });
+});
+
+r.get("/admin/users", requireAuth, requirePermission("users.view"), (req, res) => {
+  res.json({ users: User.all().map(u => safeUser(u)) });
+});
+
+r.post("/admin/users/:id/role", requireAuth, requirePermission("users.manage"), (req, res) => {
+  const user = User.find(Number(req.params.id));
+  const role = Role.find(Number(req.body.roleId));
+  if (!user || !role) return res.status(400).json({ error: "Invalid user or role" });
+
+  user.assignRole(role.toJSON().id);
+  const fresh = safeUser(user);
+  if (req.session.user?.id === fresh.id) req.session.user = fresh;
+  res.json({ ok: true, user: fresh });
+});
+
+r.post("/admin/users/:id/permissions", requireAuth, requirePermission("users.manage"), (req, res) => {
+  const user = User.find(Number(req.params.id));
+  if (!user) return res.status(400).json({ error: "Invalid user" });
+  user.syncPermissions(req.body.permissions || []);
+
+  const fresh = safeUser(user);
+  if (req.session.user?.id === fresh.id) req.session.user = fresh;
+  res.json({ ok: true, user: fresh });
+});
+
+r.get("/admin/users/:id/ability", requireAuth, requirePermission("users.view"), (req, res) => {
+  const user = User.find(Number(req.params.id));
+  if (!user) return res.status(404).json({ error: "User not found" });
+  res.json({ userId: user.toJSON().id, role: user.role()?.toJSON().name || null, permissions: getAllPermissions(user) });
+});
+
 r.get("/admin/summary", requireAuth, requirePermission("admin.access"), (req, res) => {
   res.json({
     ok: true,
     stats: {
-      users: users.length,
-      payments: payments.length,
-      pos: purchaseOrders.length,
-      projects: projects.length
+      users: User.all().length,
+      payments: Payment.all().length,
+      pos: PurchaseOrder.all().length,
+      projects: Project.all().length,
+      approvals: Approval.all().length,
+      fundingRequests: FundingRequest.all().length
     }
   });
 });
 
-// Users / Roles / Permissions
-r.get("/admin/permissions", requireAuth, requirePermission("roles.view"), (req, res) => res.json({ permissions }));
-r.get("/admin/roles", requireAuth, requirePermission("roles.view"), (req, res) => res.json({ roles }));
 
-r.get("/admin/users", requireAuth, requirePermission("users.view"), (req, res) => {
-  res.json({ users: users.map(safeUser) });
-});
-
-r.post("/admin/users/:id/role", requireAuth, requirePermission("users.manage"), (req, res) => {
-  const id = Number(req.params.id);
-  const { roleId } = req.body;
-  const u = users.find(x => x.id === id);
-  const r0 = roles.find(x => x.id === Number(roleId));
-  if (!u || !r0) return res.status(400).json({ error: "Invalid user or role" });
-  u.roleId = r0.id;
-  res.json({ ok: true, user: safeUser(u) });
-});
-
-// Payments
 r.get("/admin/payments", requireAuth, requirePermission("payments.view"), (req, res) => {
-  res.json({ payments });
+  res.json({ payments: Payment.all().map(x => x.toJSON()) });
 });
 
-// POs
 r.get("/admin/pos", requireAuth, requirePermission("pos.view"), (req, res) => {
-  res.json({ purchaseOrders });
+  res.json({ purchaseOrders: PurchaseOrder.all().map(x => x.toJSON()) });
 });
 
-// Projects + tasks
 r.get("/admin/projects", requireAuth, requirePermission("projects.view"), (req, res) => {
-  res.json({ projects });
+  res.json({ projects: Project.all().map(x => x.toJSON()) });
 });
 
 r.get("/admin/projects/:id/tasks", requireAuth, requirePermission("projects.view"), (req, res) => {
-  const id = Number(req.params.id);
-  res.json({ tasks: projectTasksByProject[id] || [] });
+  res.json({ tasks: ProjectTask.where({ project_id: Number(req.params.id) }).map(x => x.toJSON()) });
 });
 
 export default r;
