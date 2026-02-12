@@ -74,17 +74,8 @@ const error = ref("");
 const form = ref({ poNumber: "", vendor: "", project: "", status: "submitted", total: 0 });
 
 async function load() {
-  try {
-    const { data } = await api.get("/admin/purchase-orders");
-    pos.value = data.purchaseOrders;
-  } catch (e) {
-    if (e?.response?.status === 404) {
-      const { data } = await api.get("/admin/pos");
-      pos.value = data.purchaseOrders;
-      return;
-    }
-    throw e;
-  }
+  const { data } = await api.get("/admin/purchase-orders");
+  pos.value = data.purchaseOrders;
 }
 
 async function createPo() {
